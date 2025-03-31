@@ -1,0 +1,18 @@
+[gd_scene load_steps=4 format=3 uid="uid://d354j226d1wc7"]
+
+[ext_resource type="PackedScene" uid="uid://7gmgrcmmbjmd" path="res://scenes/player.tscn" id="1_kxer1"]
+[ext_resource type="PackedScene" uid="uid://c1jxraiwklqns" path="res://scenes/floor.tscn" id="1_l2146"]
+
+[sub_resource type="Environment" id="Environment_tfuh1"]
+
+[node name="World" type="Node3D"]
+
+[node name="PlayerAbe" parent="." instance=ExtResource("1_kxer1")]
+
+[node name="Floor" parent="." instance=ExtResource("1_l2146")]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_tfuh1")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, -5.95416e-16, 2.4663e-16, 2.4663e-16, 0.707107, 0.707107, -5.95416e-16, -0.707107, 0.707107, 0, 3.03116, 0)
