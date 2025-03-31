@@ -5,6 +5,10 @@
 .import/
 export.cfg
 export_credentials.cfg
+icon.svg.import
+
+# MacOS specific ignores
+.DS_Store
 
 # Imported translations (automatically generated from CSV files)
 *.translation
