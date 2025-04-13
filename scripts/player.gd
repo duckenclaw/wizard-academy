@@ -4,7 +4,7 @@ const WALK_SPEED = 5.0
 const RUN_SPEED = 8.0
 const SPRINT_SPEED = 12.0
 const CROUCH_SPEED = 3.0
-const JUMP_VELOCITY = 4.5
+const JUMP_VELOCITY = 6.5
 const MOUSE_SENSITIVITY = 0.002
 const INPUT_BUFFER_TIME = 1.0
 const CHARGE_BUFFER_TIME = 0.8
@@ -99,10 +99,7 @@ func _physics_process(delta):
 		play_animation("death_standing")
 		return
 
-	if !can_move:
-		return
-
-	# Add the gravity
+	# Always apply gravity, even when can't move
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 
@@ -112,9 +109,6 @@ func _physics_process(delta):
 	move_and_slide()
 
 func handle_movement(delta):
-	if !can_move or is_blocking:
-		return
-
 	var input_forward = Input.get_action_strength("Forward") - Input.get_action_strength("Backward")
 	var input_right = Input.get_action_strength("Right") - Input.get_action_strength("Left")
 	
@@ -137,74 +131,79 @@ func handle_movement(delta):
 	# Handle jumping
 	if Input.is_action_just_pressed("Jump") and is_on_floor():
 		velocity.y = JUMP_VELOCITY
-		if direction.length() > 0:
-			play_animation("jump_running")
+		print("jumped")
+		can_move = false
+		if is_running:
+			anim_player.play("jump_running")
+			print("playing jump_running")
+			anim_player.seek(0.4, true)
 		else:
+			can_move = false
 			play_animation("jump_standing")
+			print("playing jump_standing")
 	
-	# Handle landing
-	if is_on_floor():
-		if current_animation == "jump_running":
-			if direction.length() > 0:
-				play_animation("landing_running")
-			else:
-				play_animation("landing_running_standing")
-	
-	# Handle movement animations and velocity
-	if direction:
-		var speed = WALK_SPEED
-		if is_crouching:
-			speed = CROUCH_SPEED
-		elif is_running:
-			speed = RUN_SPEED
-			if Input.is_action_pressed("Sprint") and is_moving_forward:
-				speed = SPRINT_SPEED
-		
-		velocity.x = direction.x * speed
-		velocity.z = direction.z * speed
-		
-		# Determine movement animation
-		if is_crouching:
-			if is_moving_forward:
-				play_animation("crouch_forward")
-			elif is_moving_backward:
-				play_animation("crouch_backward")
-			elif input_right > 0:
-				play_animation("crouch_right")
-			else:
-				play_animation("crouch_left")
-		else:
-			var anim_name
-			if is_running:
+	# Apply horizontal movement only if can_move is true
+	if can_move and !is_blocking:
+		# Handle movement animations and velocity
+		if direction:
+			var speed = WALK_SPEED
+			if is_crouching:
+				speed = CROUCH_SPEED
+			elif is_running:
+				speed = RUN_SPEED
 				if Input.is_action_pressed("Sprint") and is_moving_forward:
-					anim_name = "sprint_forward"
-				elif is_moving_forward:
-					anim_name = "run_forward"
-				elif is_moving_backward:
-					anim_name = "run_backward"
-				elif input_right > 0:
-					anim_name = "run_right"
-				else:
-					anim_name = "run_left"
-			else:
+					speed = SPRINT_SPEED
+			
+			velocity.x = direction.x * speed
+			velocity.z = direction.z * speed
+			
+			# Determine movement animation
+			if is_crouching:
 				if is_moving_forward:
-					anim_name = "walk_forward"
+					play_animation("crouch_forward")
 				elif is_moving_backward:
-					anim_name = "walk_backward"
+					play_animation("crouch_backward")
 				elif input_right > 0:
-					anim_name = "walk_right"
+					play_animation("crouch_right")
 				else:
-					anim_name = "walk_left"
-			play_animation(anim_name)
+					play_animation("crouch_left")
+			else:
+				var anim_name
+				if is_running:
+					if Input.is_action_pressed("Sprint") and is_moving_forward:
+						anim_name = "sprint_forward"
+					elif is_moving_forward:
+						anim_name = "run_forward"
+					elif is_moving_backward:
+						anim_name = "run_backward"
+					elif input_right > 0:
+						anim_name = "run_right"
+					else:
+						anim_name = "run_left"
+				else:
+					if is_moving_forward:
+						anim_name = "walk_forward"
+					elif is_moving_backward:
+						anim_name = "walk_backward"
+					elif input_right > 0:
+						anim_name = "walk_right"
+					else:
+						anim_name = "walk_left"
+				play_animation(anim_name)
+		else:
+			# Slow down horizontal movement when no direction
+			velocity.x = move_toward(velocity.x, 0, WALK_SPEED)
+			velocity.z = move_toward(velocity.z, 0, WALK_SPEED)
+			if is_crouching:
+				play_animation("crouch_idle")
+			elif is_blocking:
+				play_animation("block_idle")
+			elif !is_casting and is_on_floor():
+				play_animation("idle0")
 	else:
-		velocity.x = move_toward(velocity.x, 0, WALK_SPEED)
-		velocity.z = move_toward(velocity.z, 0, WALK_SPEED)
-		if is_crouching:
-			play_animation("crouch_idle")
-		elif is_blocking:
-			play_animation("block_idle")
-		elif !is_casting:
-			play_animation("idle0")
+		# Apply gradual deceleration for inertia when can't move
+		velocity.x = move_toward(velocity.x, 0, WALK_SPEED * 0.5 * delta)
+		velocity.z = move_toward(velocity.z, 0, WALK_SPEED * 0.5 * delta)
 
 	# Handle attacks
 	if Input.is_action_just_pressed("Attack") and !is_blocking:
@@ -375,11 +374,28 @@ func _on_animation_player_animation_finished(anim_name: String):
 			anim_player.play("idle0")
 		
 		# Jump animations
-		"jump_standing", "jump_running":
+		"jump_standing":
 			if is_on_floor():
+				anim_player.seek(1.1, true)
 				play_animation("idle0")
-		"landing_running", "landing_running_standing":
+				can_move = true
+			
+		"jump_running":
+			# Handle landing
+			if is_on_floor():
+				if is_moving_forward:
+					play_animation("landing_running")
+				else:
+					play_animation("landing_running_standing")
+			else:
+				anim_player.play("jump_running")
+				anim_player.seek(1.1, true)
+		"landing_running":
+			play_animation("run_forward")
+			can_move = true
+		"landing_running_standing":
 			play_animation("idle0")
+			can_move = true
 		
 		# Combat animations
 		"cast0", "cast_area", "cast_charge0", "cast_ground", "cast_upward0":
