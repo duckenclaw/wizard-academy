@@ -9,66 +9,6 @@ const MOUSE_SENSITIVITY = 0.002
 const INPUT_BUFFER_TIME = 1.0
 const CHARGE_BUFFER_TIME = 0.8
 
-# Animation states
-enum AnimState {
-	# Idle states
-	IDLE0,
-	IDLE1,
-	IDLE2,
-	
-	# Movement states
-	WALK_FORWARD,
-	WALK_BACKWARD,
-	WALK_RIGHT,
-	WALK_LEFT,
-	RUN_FORWARD,
-	RUN_BACKWARD,
-	RUN_RIGHT,
-	RUN_LEFT,
-	SPRINT_FORWARD,
-	
-	# Turn states
-	TURN_RIGHT,
-	TURN_LEFT,
-	
-	# Jump states
-	JUMP_STANDING,
-	JUMP_RUNNING,
-	LANDING_RUNNING,
-	LANDING_RUNNING_STANDING,
-	
-	# Combat states
-	CAST0,
-	CAST1,
-	CAST_AREA,
-	CAST_CHARGE0,
-	CAST_CHARGE1,
-	CAST_CHARGE2,
-	CAST_GROUND,
-	CAST_UPWARD0,
-	
-	# Impact states
-	IMPACT0,
-	IMPACT1,
-	IMPACT2,
-	DEATH_STANDING,
-	
-	# Crouch states
-	CROUCH,
-	CROUCH_IDLE,
-	CROUCH_FORWARD,
-	CROUCH_BACKWARD,
-	CROUCH_LEFT,
-	CROUCH_RIGHT,
-	UNCROUCH,
-	
-	# Block states
-	BLOCK,
-	BLOCK_IDLE,
-	BLOCK_STAGGER,
-	UNBLOCK
-}
-
 # Move types
 enum MoveType {
 	REGULAR_ATTACK,
@@ -81,13 +21,11 @@ enum MoveType {
 # Node references
 @onready var camera: Camera3D = $Armature/Camera3D
 @onready var anim_player: AnimationPlayer = $AnimationPlayer
-@onready var spell_timer: Timer = $SpellTimer
 
 # Character properties
-var current_state: AnimState = AnimState.IDLE0
+var current_animation: String = "idle0"
 var health: float = 100.0
 var gravity = ProjectSettings.get_setting("physics/3d/default_gravity")
-var idle_timer: float = 0.0
 var idle_threshold: float = 5.0
 var is_casting: bool = false
 var is_running: bool = false
@@ -106,11 +44,6 @@ var last_mouse_x: float = 0.0
 
 func _ready():
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	spell_timer = Timer.new()
-	add_child(spell_timer)
-	spell_timer.wait_time = 1.0
-	spell_timer.one_shot = true
-	spell_timer.connect("timeout", Callable(self, "_on_spell_timer_timeout"))
 	anim_player.animation_finished.connect(Callable(self, "_on_animation_player_animation_finished"))
 
 func _input(event):
@@ -126,6 +59,24 @@ func _input(event):
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 		else:
 			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	
+	# Track movement inputs for input buffer
+	if event.is_action_pressed("Forward"):
+		add_to_input_buffer("W")
+		last_direction = "forward"
+		direction_change_time = Time.get_ticks_msec() / 1000.0
+	elif event.is_action_pressed("Backward"):
+		add_to_input_buffer("S")
+		last_direction = "backward"
+		direction_change_time = Time.get_ticks_msec() / 1000.0
+	elif event.is_action_pressed("Left"):
+		add_to_input_buffer("A")
+		last_direction = "left"
+		direction_change_time = Time.get_ticks_msec() / 1000.0
+	elif event.is_action_pressed("Right"):
+		add_to_input_buffer("D")
+		last_direction = "right"
+		direction_change_time = Time.get_ticks_msec() / 1000.0
 	
 	# Handle crouch
 	if event.is_action_pressed("Crouch") and !is_blocking:
@@ -145,7 +96,7 @@ func _input(event):
 
 func _physics_process(delta):
 	if health <= 0:
-		play_animation(AnimState.DEATH_STANDING)
+		play_animation("death_standing")
 		return
 
 	if !can_move:
@@ -157,13 +108,6 @@ func _physics_process(delta):
 
 	# Handle movement and animations
 	handle_movement(delta)
-	
-	# Update idle animations
-	if current_state == AnimState.IDLE0:
-		idle_timer += delta
-		if idle_timer >= idle_threshold:
-			play_random_idle()
-			idle_timer = 0.0
 	
 	move_and_slide()
 
@@ -194,17 +138,17 @@ func handle_movement(delta):
 	if Input.is_action_just_pressed("Jump") and is_on_floor():
 		velocity.y = JUMP_VELOCITY
 		if direction.length() > 0:
-			play_animation(AnimState.JUMP_RUNNING)
+			play_animation("jump_running")
 		else:
-			play_animation(AnimState.JUMP_STANDING)
+			play_animation("jump_standing")
 	
 	# Handle landing
 	if is_on_floor():
-		if current_state == AnimState.JUMP_RUNNING:
+		if current_animation == "jump_running":
 			if direction.length() > 0:
-				play_animation(AnimState.LANDING_RUNNING)
+				play_animation("landing_running")
 			else:
-				play_animation(AnimState.LANDING_RUNNING_STANDING)
+				play_animation("landing_running_standing")
 	
 	# Handle movement animations and velocity
 	if direction:
@@ -222,125 +166,105 @@ func handle_movement(delta):
 		# Determine movement animation
 		if is_crouching:
 			if is_moving_forward:
-				play_animation(AnimState.CROUCH_FORWARD)
+				play_animation("crouch_forward")
 			elif is_moving_backward:
-				play_animation(AnimState.CROUCH_BACKWARD)
+				play_animation("crouch_backward")
 			elif input_right > 0:
-				play_animation(AnimState.CROUCH_RIGHT)
+				play_animation("crouch_right")
 			else:
-				play_animation(AnimState.CROUCH_LEFT)
+				play_animation("crouch_left")
 		else:
-			var anim_state
+			var anim_name
 			if is_running:
 				if Input.is_action_pressed("Sprint") and is_moving_forward:
-					anim_state = AnimState.SPRINT_FORWARD
+					anim_name = "sprint_forward"
 				elif is_moving_forward:
-					anim_state = AnimState.RUN_FORWARD
+					anim_name = "run_forward"
 				elif is_moving_backward:
-					anim_state = AnimState.RUN_BACKWARD
+					anim_name = "run_backward"
 				elif input_right > 0:
-					anim_state = AnimState.RUN_RIGHT
+					anim_name = "run_right"
 				else:
-					anim_state = AnimState.RUN_LEFT
+					anim_name = "run_left"
 			else:
 				if is_moving_forward:
-					anim_state = AnimState.WALK_FORWARD
+					anim_name = "walk_forward"
 				elif is_moving_backward:
-					anim_state = AnimState.WALK_BACKWARD
+					anim_name = "walk_backward"
 				elif input_right > 0:
-					anim_state = AnimState.WALK_RIGHT
+					anim_name = "walk_right"
 				else:
-					anim_state = AnimState.WALK_LEFT
-			play_animation(anim_state)
+					anim_name = "walk_left"
+			play_animation(anim_name)
 	else:
 		velocity.x = move_toward(velocity.x, 0, WALK_SPEED)
 		velocity.z = move_toward(velocity.z, 0, WALK_SPEED)
 		if is_crouching:
-			play_animation(AnimState.CROUCH_IDLE)
+			play_animation("crouch_idle")
 		elif is_blocking:
-			play_animation(AnimState.BLOCK_IDLE)
-		else:
-			play_animation(AnimState.IDLE0)
+			play_animation("block_idle")
+		elif !is_casting:
+			play_animation("idle0")
 
 	# Handle attacks
 	if Input.is_action_just_pressed("Attack") and !is_blocking:
 		handle_attack_input()
 
-func play_random_idle():
-	var idles = [AnimState.IDLE1, AnimState.IDLE2]
-	play_animation(idles[randi() % idles.size()])
-
 func start_crouch():
 	is_crouching = true
-	play_animation(AnimState.CROUCH)
-	await anim_player.animation_finished
-	if is_crouching:  # Check if still crouching after animation
-		play_animation(AnimState.CROUCH_IDLE)
+	can_move = false
+	play_animation("crouch")
 
 func end_crouch():
-	play_animation(AnimState.UNCROUCH)
-	await anim_player.animation_finished
-	is_crouching = false
-	play_animation(AnimState.IDLE0)
+	play_animation("uncrouch")
 
 func start_block():
-	is_blocking = true
+	print("blocking")
 	can_move = false
-	play_animation(AnimState.BLOCK)
-	await anim_player.animation_finished
-	if is_blocking:  # Check if still blocking after animation
-		play_animation(AnimState.BLOCK_IDLE)
-		can_move = true
+	play_animation("block")
 
 func end_block():
-	can_move = false
-	play_animation(AnimState.UNBLOCK)
-	await anim_player.animation_finished
-	is_blocking = false
-	can_move = true
-	play_animation(AnimState.IDLE0)
+	print("unblocking")
+	play_animation("unblock")
 
 func take_damage(amount: float):
 	if is_blocking:
 		print("Blocked!")
-		play_animation(AnimState.BLOCK_STAGGER)
+		play_animation("block_stagger")
 		return
 		
 	health -= amount
-	var impact_anims = [AnimState.IMPACT0, AnimState.IMPACT1, AnimState.IMPACT2]
-	play_animation(impact_anims[randi() % impact_anims.size()])
+	can_move = false
+	play_animation("impact0")
 	
 	if health <= 0:
-		play_animation(AnimState.DEATH_STANDING)
+		play_animation("death_standing")
 
 func execute_regular_attack():
 	is_casting = true
-	play_animation([AnimState.CAST0, AnimState.CAST1][randi() % 2])
-	spell_timer.start()
+	can_move = false
+	play_animation("cast0")
 
 func execute_forward_attack():
 	is_casting = true
-	play_animation(AnimState.CAST_UPWARD0)
-	spell_timer.start()
+	can_move = false
+	play_animation("cast_upward0")
 
 func execute_backward_attack():
 	is_casting = true
-	play_animation(AnimState.CAST_GROUND)
-	spell_timer.start()
+	can_move = false
+	play_animation("cast_ground")
 
 func execute_area_attack():
 	is_casting = true
-	play_animation(AnimState.CAST_AREA)
-	spell_timer.start()
+	can_move = false
+	play_animation("cast_area")
 
 func execute_charge_attack():
 	is_casting = true
-	var charge_anims = [AnimState.CAST_CHARGE0, AnimState.CAST_CHARGE1, AnimState.CAST_CHARGE2]
-	play_animation(charge_anims[randi() % charge_anims.size()])
-	spell_timer.start()
+	can_move = false
+	play_animation("cast_charge0")
 
-func _on_spell_timer_timeout():
-	is_casting = false
 
 func add_to_input_buffer(input: String):
 	var current_time = Time.get_ticks_msec() / 1000.0
@@ -424,119 +348,27 @@ func arrays_equal(arr1: Array, arr2: Array) -> bool:
 	
 	return true
 
-func play_animation(anim_state: AnimState):
+func play_animation(anim_name: String):
 	# Don't interrupt non-interruptible animations
-	if !can_interrupt_current_animation() and current_state != anim_state:
-		return
 		
-	current_state = anim_state
-	match anim_state:
-		AnimState.IDLE0:
-			anim_player.play("idle0")
-			print("playing idle animation")
-		AnimState.IDLE1:
-			anim_player.play("idle1")
-		AnimState.IDLE2:
-			anim_player.play("idle2")
-		AnimState.WALK_FORWARD:
-			anim_player.play("walk_forward")
-		AnimState.WALK_BACKWARD:
-			anim_player.play("walk_backward")
-		AnimState.WALK_RIGHT:
-			anim_player.play("walk_right")
-		AnimState.WALK_LEFT:
-			anim_player.play("walk_left")
-		AnimState.RUN_FORWARD:
-			anim_player.play("run_forward")
-		AnimState.RUN_BACKWARD:
-			anim_player.play("run_backward")
-		AnimState.RUN_RIGHT:
-			anim_player.play("run_right")
-		AnimState.RUN_LEFT:
-			anim_player.play("run_left")
-		AnimState.SPRINT_FORWARD:
-			anim_player.play("sprint_forward")
-		AnimState.JUMP_STANDING:
-			anim_player.play("jump_standing")
-		AnimState.JUMP_RUNNING:
-			anim_player.play("jump_running")
-		AnimState.LANDING_RUNNING:
-			anim_player.play("landing_running")
-		AnimState.LANDING_RUNNING_STANDING:
-			anim_player.play("landing_running_standing")
-		AnimState.CAST0:
-			anim_player.play("cast0")
-		AnimState.CAST1:
-			anim_player.play("cast1")
-		AnimState.CAST_AREA:
-			anim_player.play("cast_area")
-		AnimState.CAST_CHARGE0:
-			anim_player.play("cast_charge0")
-		AnimState.CAST_CHARGE1:
-			anim_player.play("cast_charge1")
-		AnimState.CAST_CHARGE2:
-			anim_player.play("cast_charge2")
-		AnimState.CAST_GROUND:
-			anim_player.play("cast_ground")
-		AnimState.CAST_UPWARD0:
-			anim_player.play("cast_upward0")
-		AnimState.IMPACT0:
-			anim_player.play("impact0")
-		AnimState.IMPACT1:
-			anim_player.play("impact1")
-		AnimState.IMPACT2:
-			anim_player.play("impact2")
-		AnimState.DEATH_STANDING:
-			anim_player.play("death_standing")
-		AnimState.CROUCH:
-			anim_player.play("crouch")
-		AnimState.CROUCH_IDLE:
-			anim_player.play("crouch_idle")
-		AnimState.CROUCH_FORWARD:
-			anim_player.play("crouch_forward")
-		AnimState.CROUCH_BACKWARD:
-			anim_player.play("crouch_backward")
-		AnimState.CROUCH_LEFT:
-			anim_player.play("crouch_left")
-		AnimState.CROUCH_RIGHT:
-			anim_player.play("crouch_right")
-		AnimState.UNCROUCH:
-			anim_player.play("uncrouch")
-		AnimState.BLOCK:
-			anim_player.play("block")
-		AnimState.BLOCK_IDLE:
-			anim_player.play("block_idle")
-		AnimState.BLOCK_STAGGER:
-			anim_player.play("block_stagger")
-		AnimState.UNBLOCK:
-			anim_player.play("unblock")
+	current_animation = anim_name
+	anim_player.play(anim_name)
 
 func can_interrupt_current_animation() -> bool:
 	# List of animations that can be interrupted
-	var interruptible_states = [
-		AnimState.IDLE0,
-		AnimState.IDLE1,
-		AnimState.IDLE2,
-		AnimState.WALK_FORWARD,
-		AnimState.WALK_BACKWARD,
-		AnimState.WALK_RIGHT,
-		AnimState.WALK_LEFT,
-		AnimState.RUN_FORWARD,
-		AnimState.RUN_BACKWARD,
-		AnimState.RUN_RIGHT,
-		AnimState.RUN_LEFT,
-		AnimState.SPRINT_FORWARD,
-		AnimState.CROUCH_IDLE,
-		AnimState.CROUCH_FORWARD,
-		AnimState.CROUCH_BACKWARD,
-		AnimState.CROUCH_LEFT,
-		AnimState.CROUCH_RIGHT,
-		AnimState.BLOCK_IDLE
+	var interruptible_animations = [
+		"idle0", "idle1", "idle2",
+		"walk_forward", "walk_backward", "walk_right", "walk_left",
+		"run_forward", "run_backward", "run_right", "run_left", "sprint_forward",
+		"crouch_idle", "crouch_forward", "crouch_backward", "crouch_left", "crouch_right",
+		"block_idle"
 	]
 	
-	return current_state in interruptible_states
+	return current_animation in interruptible_animations
 
 func _on_animation_player_animation_finished(anim_name: String):
+	print(anim_name)
+	
 	# Handle transitions back to idle state for non-interruptible animations
 	match anim_name:
 		"idle0", "idle1":
@@ -545,46 +377,51 @@ func _on_animation_player_animation_finished(anim_name: String):
 		# Jump animations
 		"jump_standing", "jump_running":
 			if is_on_floor():
-				play_animation(AnimState.IDLE0)
+				play_animation("idle0")
 		"landing_running", "landing_running_standing":
-			play_animation(AnimState.IDLE0)
+			play_animation("idle0")
 		
 		# Combat animations
-		"cast0", "cast1", "cast_area", "cast_charge0", "cast_charge1", \
-		"cast_charge2", "cast_ground", "cast_upward0":
+		"cast0", "cast_area", "cast_charge0", "cast_ground", "cast_upward0":
 			is_casting = false
-			anim_player.play("idle0")
+			can_move = true
+			print("playing idle animation")
+			play_animation("idle0")
+			
 		
 		# Impact animations
-		"impact0", "impact1", "impact2":
+		"impact0":
 			if health > 0:  # Only transition to idle if not dead
-				play_animation(AnimState.IDLE0)
+				play_animation("idle0")
+				return
+			can_move = true
 		
 		# Crouch transitions
 		"crouch":
 			if is_crouching:
-				play_animation(AnimState.CROUCH_IDLE)
+				play_animation("crouch_idle")
+				can_move = true
 		"uncrouch":
-			if !is_crouching:
-				play_animation(AnimState.IDLE0)
+			is_crouching = false
+			can_move = true
+			play_animation("idle0")
 		
 		# Block transitions
 		"block":
-			if is_blocking:
-				play_animation(AnimState.BLOCK_IDLE)
+			is_blocking = true
+			play_animation("block_idle")
 		"unblock":
-			if !is_blocking:
-				play_animation(AnimState.IDLE0)
+			print("unblock ended")
+			is_blocking = false
+			can_move = true
+			play_animation("idle0")
 		"block_stagger":
+			can_move = true
 			if is_blocking:
-				play_animation(AnimState.BLOCK_IDLE)
+				play_animation("block_idle")
 			else:
-				play_animation(AnimState.IDLE0)
+				play_animation("idle0")
 		
 		# Death animation (no transition)
 		"death_standing":
 			pass  # Stay in death animation
-
-	# Reset idle timer when transitioning back to idle
-	if anim_name != "idle0" and anim_name != "idle1" and anim_name != "idle2":
-		idle_timer = 0.0
